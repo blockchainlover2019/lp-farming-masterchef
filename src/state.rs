@@ -5,6 +5,14 @@ use cosmwasm_std::{Addr, Uint128};
 use cw_storage_plus::{Item, Map};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct StakerInfo {
+    pub address: Addr,
+    pub amount: Uint128,
+    pub reward: Uint128,
+    pub last_time: u64
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Owner If None set, contract is frozen.
     pub owner: Option<Addr>,
@@ -21,3 +29,9 @@ pub struct Config {
 
 pub const CONFIG_KEY: &str = "config";
 pub const CONFIG: Item<Config> = Item::new(CONFIG_KEY);
+
+pub const STAKERS_KEY: &str = "stakers";
+pub const STAKERS: Map<Addr, (Uint128, Uint128, u64)> = Map::new(STAKERS_KEY);
+
+pub const UNSTAKING_KEY: &str = "unstaking";
+pub const UNSTAKING: Map<Addr, Vec<(Uint128, u64)>> = Map::new(UNSTAKING_KEY);
