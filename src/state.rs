@@ -27,6 +27,26 @@ pub struct Config {
     pub enabled: bool
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct StakerListResponse {
+    pub stakers: Vec<StakerInfo>,
+}
+
+/// Returns the vote (opinion as well as weight counted) as well as
+/// the address of the voter who submitted it
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct StakerResponse {
+    pub address: Addr,
+    pub amount: Uint128,
+    pub reward: Uint128,
+    pub last_time: u64
+}
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct CountInfo {
+    pub count: u128
+}
+
 pub const CONFIG_KEY: &str = "config";
 pub const CONFIG: Item<Config> = Item::new(CONFIG_KEY);
 

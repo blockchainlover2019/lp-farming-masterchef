@@ -1,10 +1,14 @@
+#![allow(dead_code)]
+#![allow(unused_mut)]
+#![allow(unused_assignments)]
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     attr, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
     WasmMsg, WasmQuery, QueryRequest,Order, Addr, Storage
 };
-use cw2::{get_contract_version, set_contract_version};
+use cw2::{set_contract_version};
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, Cw20QueryMsg};
 use cw20::{TokenInfoResponse};
 use cw_utils::{maybe_addr};
@@ -12,12 +16,18 @@ use cw_storage_plus::Bound;
 
 use crate::error::CustomError;
 use crate::state::{
-    Config, CONFIG, STAKERS, UNSTAKING, StakerInfo
+    Config, CONFIG, STAKERS, UNSTAKING, StakerInfo, StakerResponse, StakerListResponse
 };
 use crate::msg::{ InstantiateMsg, ExecuteMsg, QueryMsg, ConfigResponse };
 
 const CONTRACT_NAME: &str = "lp-staking";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const MULTIPLE:u128 = 10_000_000_000u128;
+
+// settings for pagination
+const MAX_LIMIT: u32 = 30;
+const DEFAULT_LIMIT: u32 = 10;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -65,27 +75,6 @@ pub fn execute(
         ExecuteMsg::RemoveAllStakers { start_after, limit } => execute_remove_all_stakers(deps, info, start_after, limit),
     }
 }
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
-  to_binary(&query_config(deps)?)
-}
-
-pub fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
-  let cfg = CONFIG.load(deps.storage)?;
-  Ok(ConfigResponse {
-      owner: cfg.owner.map(|o| o.into()),
-      reward_token_address: cfg.reward_token_address.into(),
-      stake_token_address: cfg.stake_token_address.into(),
-      reward_amount: cfg.reward_amount,
-      stake_amount: cfg.stake_amount,
-      daily_reward_amount: cfg.daily_reward_amount,
-      apy_prefix: cfg.apy_prefix,
-      reward_interval: cfg.reward_interval,
-      lock_days: cfg.lock_days
-  })
-}
-
-
 
 pub fn try_withdraw_reward(deps: DepsMut, info: MessageInfo) -> Result<Response, CustomError> {
     
@@ -251,7 +240,7 @@ pub fn try_create_unstake(
 
   check_enabled(&deps, &info)?;
   update_reward(deps.storage, env.clone(), info.sender.clone(), None)?;
-  let mut cfg = CONFIG.load(deps.storage)?;
+  let cfg = CONFIG.load(deps.storage)?;
   let (amount, reward, last_time) = STAKERS.load(deps.storage, info.sender.clone())?;
   
   if unstake_amount == Uint128::zero() {
@@ -265,7 +254,7 @@ pub fn try_create_unstake(
       return Err(CustomError::NotEnoughStake {});
   }
 
-  let mut exists = UNSTAKING.may_load(deps.storage, info.sender.clone())?;
+  let exists = UNSTAKING.may_load(deps.storage, info.sender.clone())?;
   let mut unstaking = vec![];
   if exists.is_some() {
       unstaking = exists.unwrap();
@@ -277,7 +266,7 @@ pub fn try_create_unstake(
   STAKERS.save(deps.storage, info.sender.clone(), &(amount - unstake_amount, reward, last_time))?;
 
   // ++ Added: update stake_amount excluding unstake_amount
-  update_stake_amount(deps.storage, env.clone(), unstake_amount);
+  update_stake_amount(deps.storage, env.clone(), unstake_amount)?;
 
   return Ok(Response::new()
       .add_attributes(vec![
@@ -469,7 +458,7 @@ pub fn check_owner(
 }
 pub fn check_enabled(
   deps: &DepsMut,
-  info: &MessageInfo
+  _info: &MessageInfo
 ) -> Result<Response, CustomError> {
   let cfg = CONFIG.load(deps.storage)?;
   if !cfg.enabled {
@@ -480,7 +469,7 @@ pub fn check_enabled(
 
 pub fn update_stake_amount (
   storage: &mut dyn Storage,
-  env: Env,
+  _env: Env,
   unstake_amount: Uint128
 ) -> Result<Response, CustomError> {
     
@@ -532,4 +521,105 @@ fn map_staker(
           last_time
       }
   })
+}
+
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::Config {} 
+            => to_binary(&query_config(deps)?),
+        QueryMsg::Staker {address} 
+            => to_binary(&query_staker(deps, address)?),
+        QueryMsg::ListStakers {start_after, limit} 
+            => to_binary(&query_list_stakers(deps, start_after, limit)?),
+        QueryMsg::Apy {} 
+            => to_binary(&query_apy(deps)?),
+        QueryMsg::Unstaking {address} 
+            => to_binary(&query_unstaking(deps, address)?),
+    }
+}
+
+
+pub fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+  let cfg = CONFIG.load(deps.storage)?;
+  Ok(ConfigResponse {
+      owner: cfg.owner.map(|o| o.into()),
+      reward_token_address: cfg.reward_token_address.into(),
+      stake_token_address: cfg.stake_token_address.into(),
+      reward_amount: cfg.reward_amount,
+      stake_amount: cfg.stake_amount,
+      daily_reward_amount: cfg.daily_reward_amount,
+      apy_prefix: cfg.apy_prefix,
+      reward_interval: cfg.reward_interval,
+      lock_days: cfg.lock_days
+  })
+}
+
+fn query_staker(deps: Deps, address: Addr) -> StdResult<StakerResponse> {
+  
+  let exists = STAKERS.may_load(deps.storage, address.clone())?;
+  let (mut amount, mut reward, mut last_time) = (Uint128::zero(), Uint128::zero(), 0u64);
+  if exists.is_some() {
+      (amount, reward, last_time) = exists.unwrap();
+  } 
+  Ok(StakerResponse {
+      address,
+      amount,
+      reward,
+      last_time
+  })
+}
+
+
+fn query_unstaking(deps: Deps, address: Addr) -> StdResult<Vec<(Uint128, u64)>> {
+  
+  let mut exists = UNSTAKING.may_load(deps.storage, address.clone())?;
+  let mut unstaking = vec![];
+  if exists.is_some() {
+      unstaking = exists.unwrap();
+  } 
+  Ok(unstaking)
+}
+
+
+fn query_list_stakers(
+  deps: Deps,
+  start_after: Option<String>,
+  limit: Option<u32>,
+) -> StdResult<StakerListResponse> {
+  let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+  let addr = maybe_addr(deps.api, start_after)?;
+  let start = addr.map(|addr| Bound::exclusive(addr.as_ref()));
+
+  let stakers:StdResult<Vec<_>> = STAKERS
+      .range(deps.storage, start, None, Order::Ascending)
+      .take(limit)
+      .map(|item| map_staker(item))
+      .collect();
+
+  Ok(StakerListResponse { stakers: stakers? })
+}
+
+pub fn query_apy(deps: Deps) -> StdResult<Uint128> {
+  let cfg = CONFIG.load(deps.storage)?;
+  let total_staked = cfg.stake_amount;
+  if total_staked == Uint128::zero() {
+      return Ok(Uint128::zero());
+  }
+  // For integer handling, return apy * MULTIPLE(10^10)
+
+  let stake_token_info: TokenInfoResponse =
+      deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+          contract_addr: cfg.stake_token_address.clone().into(),
+          msg: to_binary(&Cw20QueryMsg::TokenInfo {})?,
+      }))?;
+  
+  let stake_current_supply = Uint128::from(stake_token_info.total_supply);
+
+  let stake_rate = (stake_current_supply.checked_div(Uint128::from(10_000_000_000u128)).unwrap())
+  .checked_add(Uint128::from(10000u128)).unwrap();
+  
+  Ok(cfg.apy_prefix.checked_mul(Uint128::from(MULTIPLE)).unwrap().checked_mul(Uint128::from(MULTIPLE)).unwrap().checked_div(stake_rate).unwrap().checked_div(total_staked).unwrap())
+
 }

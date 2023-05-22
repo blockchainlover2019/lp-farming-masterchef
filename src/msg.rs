@@ -55,7 +55,22 @@ pub enum ExecuteMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum QueryMsg {}
+pub enum QueryMsg {
+  Config {},
+  Staker {
+      address: Addr
+  },
+  ListStakers {
+      start_after: Option<String>,
+      limit: Option<u32>
+  },
+  Apy {
+
+  },
+  Unstaking {
+      address: Addr
+  }
+}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -70,3 +85,6 @@ pub struct ConfigResponse {
     pub reward_interval: u64,
     pub lock_days: u64
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {}
